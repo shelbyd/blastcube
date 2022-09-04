@@ -1,12 +1,12 @@
 use crate::cube::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Move {
     pub face: Face,
     pub direction: Direction,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, enum_iterator::Sequence)]
 pub enum Direction {
     Single,
     Double,
@@ -16,6 +16,12 @@ pub enum Direction {
 impl Move {
     pub fn parse_sequence(s: &str) -> anyhow::Result<Vec<Move>> {
         s.split(" ").map(|s| s.parse()).collect()
+    }
+
+    pub fn all() -> impl Iterator<Item = Move> {
+        enum_iterator::all::<Face>().flat_map(|face| {
+            enum_iterator::all::<Direction>().map(move |direction| Move { face, direction })
+        })
     }
 }
 
