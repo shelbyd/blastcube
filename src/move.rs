@@ -23,6 +23,23 @@ impl Move {
             enum_iterator::all::<Direction>().map(move |direction| Move { face, direction })
         })
     }
+
+    pub fn reverse(&self) -> Move {
+        Move {
+            face: self.face,
+            direction: self.direction.reverse(),
+        }
+    }
+}
+
+impl Direction {
+    pub fn reverse(self) -> Direction {
+        match self {
+            Direction::Single => Direction::Reverse,
+            Direction::Reverse => Direction::Single,
+            Direction::Double => Direction::Double,
+        }
+    }
 }
 
 impl core::str::FromStr for Move {
