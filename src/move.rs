@@ -55,3 +55,23 @@ impl core::str::FromStr for Move {
         Ok(Move { face, direction })
     }
 }
+
+impl core::fmt::Display for Move {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "{}{}", self.face, self.direction)
+    }
+}
+
+impl core::fmt::Display for Direction {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Direction::Single => "",
+                Direction::Reverse => "'",
+                Direction::Double => "2",
+            }
+        )
+    }
+}
