@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.63"
+enum-iterator = "1.2.0"
+smallvec = "1.9.0"

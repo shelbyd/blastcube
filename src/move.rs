@@ -1,11 +1,13 @@
 use crate::cube::*;
 
+#[derive(Clone, Copy)]
 pub struct Move {
-    face: Face,
-    amount: Amount,
+    pub face: Face,
+    pub direction: Direction,
 }
 
-pub enum Amount {
+#[derive(Clone, Copy)]
+pub enum Direction {
     Single,
     Double,
     Reverse,
@@ -37,13 +39,13 @@ impl core::str::FromStr for Move {
             _ => return Err(anyhow::anyhow!("Unrecognized face {}", face_char)),
         };
 
-        let amount = match chars.next() {
-            None => Amount::Single,
-            Some('\'') => Amount::Reverse,
-            Some('2') => Amount::Double,
-            Some(c) => return Err(anyhow::anyhow!("Unrecognized amount {}", c)),
+        let direction = match chars.next() {
+            None => Direction::Single,
+            Some('\'') => Direction::Reverse,
+            Some('2') => Direction::Double,
+            Some(c) => return Err(anyhow::anyhow!("Unrecognized direction {}", c)),
         };
 
-        Ok(Move { face, amount })
+        Ok(Move { face, direction })
     }
 }

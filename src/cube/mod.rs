@@ -1,8 +1,9 @@
 use crate::prelude::*;
 
 mod cubie;
+mod surface;
 
-pub use cubie::CubieCube as Cube;
+pub use surface::Cube;
 
 pub trait CubeLike: Sized + core::fmt::Debug + Eq {
     fn solved() -> Self;
@@ -13,6 +14,7 @@ pub trait CubeLike: Sized + core::fmt::Debug + Eq {
     }
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug, enum_iterator::Sequence)]
 pub enum Face {
     Front,
     Left,
@@ -20,6 +22,23 @@ pub enum Face {
     Back,
     Up,
     Down,
+}
+
+impl core::fmt::Display for Face {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Face::Up => "U",
+                Face::Down => "D",
+                Face::Front => "F",
+                Face::Back => "B",
+                Face::Left => "L",
+                Face::Right => "R",
+            }
+        )
+    }
 }
 
 #[cfg(test)]
