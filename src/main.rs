@@ -10,7 +10,7 @@ use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
     let scrambles = [
-        "R2 U' L' R2 B2 F' L F2 U2 L' U' B",
+        "R2 U' L' R2 B2 F' L F2 U2 L'",
         "R2 U' L' R2 B2 F' L F2 U2 L' U' B D U2 L2 D2 U R' B F' L R F U R2 B' F2 L2 U' L",
     ]
     .into_iter()
@@ -39,15 +39,20 @@ fn main() -> anyhow::Result<()> {
     let solver = solver::Mitm::init(challenge);
 
     let started_at = Instant::now();
+    let mut result_cube = cube.clone();
+
     eprintln!("Starting solve");
-    let mut solved = cube.clone();
     for move_ in solver.solve(cube) {
-        solved = solved.apply(move_);
+        result_cube = result_cube.apply(move_);
         eprintln!("{:?} - {}", started_at.elapsed(), move_);
     }
 
-    assert_eq!(solved, Cube::solved());
-    eprintln!("Solved in {:?}", started_at.elapsed());
+    if result_cube == Cube::solved() {
+        eprintln!("Solved in {:?}", started_at.elapsed());
+    } else {
+        eprintln!("DNF in {:?}", started_at.elapsed());
+        eprintln!("final cube:\n{}", result_cube);
+    }
 
     Ok(())
 }
