@@ -1,6 +1,6 @@
 use crate::cube::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Move {
     pub face: Face,
     pub direction: Direction,
@@ -13,6 +13,12 @@ impl Move {
         }
 
         self.face > other.face
+    }
+}
+
+impl core::fmt::Debug for Move {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "{}{}", self.face, self.direction)
     }
 }
 

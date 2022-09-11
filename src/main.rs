@@ -9,8 +9,10 @@ use prelude::*;
 use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
+    simple_logger::SimpleLogger::new().init().unwrap();
+
     let scrambles = [
-        "R2 U' L2 R2 B2 F2 L2 F2 U2 L2",
+        "R2 U' L2 R2 B2 F2 L2 L' B D F R2 F'",
         "R2 U' L' R2 B2 F' L F2 U2 L' U' B D U2 L2 D2 U R' B F' L R F U R2 B' F2 L2 U' L",
     ]
     .into_iter()
@@ -18,7 +20,7 @@ fn main() -> anyhow::Result<()> {
     .collect::<Result<Vec<_>, _>>()?;
 
     let scramble = &scrambles[0];
-    eprintln!(
+    log::info!(
         "scramble: {}",
         scramble
             .iter()
@@ -26,10 +28,10 @@ fn main() -> anyhow::Result<()> {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    eprintln!("scramble.len(): {:#?}", scramble.len());
+    log::info!("scramble.len(): {:#?}", scramble.len());
 
     let cube = Cube::solved().apply_all(scramble.iter().cloned());
-    eprintln!("initial cube:\n{}", cube);
+    log::info!("initial cube:\n{}", cube);
 
     let challenge = Challenge {
         inspection: Duration::default(),
@@ -41,17 +43,17 @@ fn main() -> anyhow::Result<()> {
     let started_at = Instant::now();
     let mut result_cube = cube.clone();
 
-    eprintln!("Starting solve");
+    log::info!("Starting solve");
     for move_ in solver.solve(cube) {
         result_cube = result_cube.apply(move_);
-        eprintln!("{:?} - {}", started_at.elapsed(), move_);
+        log::info!("{:?} - {}", started_at.elapsed(), move_);
     }
 
     if result_cube == Cube::solved() {
-        eprintln!("Solved in {:?}", started_at.elapsed());
+        log::info!("Solved in {:?}", started_at.elapsed());
     } else {
-        eprintln!("DNF in {:?}", started_at.elapsed());
-        eprintln!("final cube:\n{}", result_cube);
+        log::info!("DNF in {:?}", started_at.elapsed());
+        log::info!("final cube:\n{}", result_cube);
     }
 
     Ok(())
