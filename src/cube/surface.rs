@@ -68,6 +68,17 @@ impl Cube {
         }
     }
 
+    fn surface(&self, face: Face) -> &Surface {
+        match face {
+            Face::Up => &self.up,
+            Face::Down => &self.down,
+            Face::Left => &self.left,
+            Face::Right => &self.right,
+            Face::Front => &self.front,
+            Face::Back => &self.back,
+        }
+    }
+
     fn surface_mut(&mut self, face: Face) -> &mut Surface {
         match face {
             Face::Up => &mut self.up,
@@ -118,6 +129,84 @@ impl Cube {
                 self.down.left_mut(),
                 self.back.right_mut(),
             ],
+        }
+    }
+
+    pub fn get(&self, location: Location) -> Face {
+        use Face::*;
+
+        match location {
+            Location::Center(f) => f,
+
+            Location::Edge(s, against) => {
+                let index = match (s, against) {
+                    (_, Up) => 1,
+                    (_, Down) => 5,
+
+                    (Front, Left) => 7,
+                    (Front, Right) => 3,
+
+                    (Back, Left) => 3,
+                    (Back, Right) => 7,
+
+                    (Left, Front) => 3,
+                    (Left, Back) => 7,
+
+                    (Right, Front) => 7,
+                    (Right, Back) => 3,
+
+                    (Up | Down, Left) => 7,
+                    (Up | Down, Right) => 3,
+
+                    (Up, Front) => 5,
+                    (Up, Back) => 1,
+
+                    (Down, Front) => 1,
+                    (Down, Back) => 5,
+
+                    _ => unreachable!(),
+                };
+
+                self.surface(s).0[index]
+            }
+
+            Location::Corner(s, e, p) => {
+                let index = match (s, e, p) {
+                    (Front, Left, Up) => 0,
+                    (Front, Left, Down) => 6,
+                    (Front, Right, Up) => 2,
+                    (Front, Right, Down) => 4,
+
+                    (Back, Left, Up) => 2,
+                    (Back, Left, Down) => 4,
+                    (Back, Right, Up) => 0,
+                    (Back, Right, Down) => 6,
+
+                    (Left, Front, Up) => 2,
+                    (Left, Front, Down) => 4,
+                    (Left, Back, Up) => 0,
+                    (Left, Back, Down) => 6,
+
+                    (Right, Front, Up) => 0,
+                    (Right, Front, Down) => 6,
+                    (Right, Back, Up) => 2,
+                    (Right, Back, Down) => 4,
+
+                    (Up, Front, Left) => 6,
+                    (Up, Front, Right) => 4,
+                    (Up, Back, Left) => 0,
+                    (Up, Back, Right) => 2,
+
+                    (Down, Front, Left) => 0,
+                    (Down, Front, Right) => 2,
+                    (Down, Back, Left) => 6,
+                    (Down, Back, Right) => 4,
+
+                    _ => unreachable!(),
+                };
+
+                self.surface(s).0[index]
+            }
         }
     }
 }

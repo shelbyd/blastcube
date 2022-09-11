@@ -10,7 +10,7 @@ use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
     let scrambles = [
-        "R2 U' L' R2 B2 F' L F2 U2 L'",
+        "R2 U' L2 R2 B2 F2 L2 F2 U2 L2",
         "R2 U' L' R2 B2 F' L F2 U2 L' U' B D U2 L2 D2 U R' B F' L R F U R2 B' F2 L2 U' L",
     ]
     .into_iter()
@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         evaluator: |seq: &[_]| Duration::from_millis(100) * (seq.len() as u32),
     };
 
-    let solver = solver::Mitm::init(challenge);
+    let solver = solver::Kociemba::init(challenge);
 
     let started_at = Instant::now();
     let mut result_cube = cube.clone();

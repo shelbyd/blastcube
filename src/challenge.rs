@@ -5,6 +5,8 @@ pub struct Challenge<E: Evaluator> {
     pub evaluator: E,
 }
 
+// Other code assumes Evaluators are not super-linear.
+//   E(a) + E(b) <= E(a + b)
 pub trait Evaluator {
     fn eval(&self, seq: &[Move]) -> Duration;
 }

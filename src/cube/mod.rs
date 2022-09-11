@@ -1,8 +1,10 @@
 use crate::prelude::*;
 
 mod cubie;
+mod facie;
 mod surface;
 
+pub use facie::Location;
 pub use surface::Cube;
 
 pub trait CubeLike: Sized + core::fmt::Debug + Eq {
@@ -14,14 +16,33 @@ pub trait CubeLike: Sized + core::fmt::Debug + Eq {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug, enum_iterator::Sequence)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug, enum_iterator::Sequence)]
 pub enum Face {
     Front,
+    Back,
     Left,
     Right,
-    Back,
     Up,
     Down,
+}
+
+impl Face {
+    pub fn same_axis(a: Face, b: Face) -> bool {
+        if a == b {
+            return true;
+        }
+
+        if a > b {
+            return Face::same_axis(b, a);
+        }
+
+        match (a, b) {
+            (Face::Front, Face::Back) => true,
+            (Face::Left, Face::Right) => true,
+            (Face::Up, Face::Down) => true,
+            _ => false,
+        }
+    }
 }
 
 impl core::fmt::Display for Face {

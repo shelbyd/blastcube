@@ -1,5 +1,8 @@
 use crate::prelude::*;
 
+mod kociemba;
+pub use kociemba::*;
+
 mod naive_iddfs;
 pub use naive_iddfs::*;
 

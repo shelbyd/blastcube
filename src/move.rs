@@ -6,6 +6,16 @@ pub struct Move {
     pub direction: Direction,
 }
 
+impl Move {
+    pub fn could_follow(&self, other: &Move) -> bool {
+        if !Face::same_axis(self.face, other.face) {
+            return true;
+        }
+
+        self.face > other.face
+    }
+}
+
 #[derive(Clone, Copy, Debug, enum_iterator::Sequence)]
 pub enum Direction {
     Single,
