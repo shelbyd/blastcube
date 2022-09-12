@@ -1,12 +1,12 @@
 use crate::prelude::*;
 
 use core::{cmp::Ordering, hash::Hash};
-use std::collections::{hash_map::HashMap, VecDeque};
+use std::collections::HashMap;
 
 pub struct Kociemba<E: Evaluator> {
     challenge: Challenge<E>,
 
-    to_domino: Phase<Axis>,
+    to_domino: Phase<usize>,
     post_domino: Phase<Option<Face>>,
 }
 
@@ -15,7 +15,12 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
         Kociemba {
             to_domino: {
                 let moves = Move::all().collect::<Vec<_>>();
-                Phase::init(moves, is_domino_cube, vec![])
+                let heuristics = vec![Heuristic::init(
+                    corner_twist_coord,
+                    &moves,
+                    &challenge.evaluator,
+                )];
+                Phase::init(moves, is_domino_cube, heuristics)
             },
             post_domino: {
                 let moves = Move::all().filter(is_domino_move).collect::<Vec<_>>();
@@ -28,22 +33,28 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
 
     fn solve(&self, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
         log::info!("Finding domino");
-        let to_domino = self.solve_to(&cube, &self.to_domino);
+        let to_domino = self.solve_to(&cube, &self.to_domino, Vec::new());
         log::info!("Domino path: {:?}", to_domino);
-        let domino_cube = cube.apply_all(to_domino.clone());
 
         log::info!("Finding solution");
-        let solution = self.solve_to(&domino_cube, &self.post_domino);
-        Box::new(to_domino.into_iter().chain(solution.into_iter()))
+        let solution = self.solve_to(&cube, &self.post_domino, to_domino);
+        Box::new(solution.into_iter())
     }
 }
 
 impl<E: Evaluator> Kociemba<E> {
-    fn solve_to<F: Eq + Hash>(&self, cube: &Cube, phase: &Phase<F>) -> Vec<Move> {
+    fn solve_to<F: Eq + Hash>(
+        &self,
+        cube: &Cube,
+        phase: &Phase<F>,
+        mut prefix: Vec<Move>,
+    ) -> Vec<Move> {
+        let cube = cube.clone().apply_all(prefix.clone());
+
         let mut best_time = Duration::default();
         loop {
             log::info!("Searching <= {:?}", best_time);
-            match self.find_solution(best_time, &cube, &mut Vec::new(), phase) {
+            match self.find_solution(best_time, &cube, &mut prefix, phase) {
                 Search::Found(moves) => return moves,
                 Search::NotFound(next_best_time) => {
                     best_time = next_best_time;
@@ -145,10 +156,8 @@ impl<F: Eq + Hash> Phase<F> {
         finished_when: fn(&Cube) -> bool,
         heuristics: Vec<Heuristic<F>>,
     ) -> Self {
-        let allowed_moves: Vec<_> = allowed_moves.into_iter().collect();
-
         Self {
-            allowed_moves,
+            allowed_moves: allowed_moves.into_iter().collect(),
             finished_when,
             heuristics,
         }
@@ -158,7 +167,7 @@ impl<F: Eq + Hash> Phase<F> {
         self.heuristics
             .iter()
             .map(|h| h.min_time(cube))
-            .min()
+            .max()
             .unwrap_or_default()
     }
 
@@ -167,49 +176,66 @@ impl<F: Eq + Hash> Phase<F> {
     }
 }
 
-struct Heuristic<F: Eq + Hash> {
-    map: HashMap<Cube<F>, Duration>,
-    simplifier: fn(Cube) -> Cube<F>,
+struct Heuristic<T: Eq + Hash> {
+    map: HashMap<T, Duration>,
+    simplifier: fn(Cube) -> T,
 }
 
-impl<F: Eq + Hash> Heuristic<F> {
-    fn init(
-        simplifier: fn(Cube) -> Cube<F>,
-        allowed_moves: &[Move],
-        evaluator: &impl Evaluator,
-    ) -> Self {
-        let allowed_moves: Vec<_> = allowed_moves.into_iter().collect();
+impl<T: Eq + Hash> Heuristic<T> {
+    fn init(simplifier: fn(Cube) -> T, allowed_moves: &[Move], evaluator: &impl Evaluator) -> Self {
+        let mut result = Self {
+            simplifier,
+            map: HashMap::default(),
+        };
 
-        let mut map = HashMap::default();
-
-        let mut explore = VecDeque::new();
-        explore.push_back(Vec::new());
-        while let Some(moves) = explore.pop_front() {
-            if map.len() > 100_000 {
+        for depth in 0..21 {
+            dbg!(depth, result.map.len());
+            if !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves) {
                 break;
-            }
-
-            let cube = simplifier(Cube::solved().apply_all(Move::inverse_seq(&moves)));
-
-            let min_time = evaluator.min_time(&moves);
-            if let Some(t) = map.get(&cube) {
-                if *t < min_time {
-                    continue;
-                }
-            }
-            map.insert(cube, min_time);
-
-            for move_ in allowed_moves.iter() {
-                let mut clone = moves.clone();
-                clone.push(**move_);
-                explore.push_back(clone);
             }
         }
 
-        Self { simplifier, map }
+        dbg!(result.map.len());
+        result
+    }
+
+    fn expand_to_depth(
+        &mut self,
+        depth: usize,
+        move_stack: &mut Vec<Move>,
+        evaluator: &impl Evaluator,
+        allowed_moves: &[Move],
+    ) -> bool {
+        let cube = (self.simplifier)(Cube::solved().apply_all(Move::inverse_seq(move_stack)));
+        let time = evaluator.min_time(move_stack);
+
+        if depth == 0 {
+            if let Some(t) = self.map.get(&cube) {
+                if *t <= time {
+                    return false;
+                }
+            }
+
+            self.map.insert(cube, time);
+            return true;
+        }
+
+        if let Some(t) = self.map.get(&cube) {
+            if *t < time {
+                return false;
+            }
+        }
+
+        allowed_moves.iter().fold(false, |any, move_| {
+            move_stack.push(*move_);
+            let result = self.expand_to_depth(depth - 1, move_stack, evaluator, allowed_moves);
+            move_stack.pop();
+            any || result
+        })
     }
 
     fn min_time(&self, cube: &Cube) -> Duration {
+        // Duration::default()
         self.map
             .get(&(self.simplifier)(cube.clone()))
             .cloned()
@@ -217,12 +243,8 @@ impl<F: Eq + Hash> Heuristic<F> {
     }
 }
 
-fn domino_axis(cube: Cube) -> Cube<Axis> {
-    cube.map(|value| match value {
-        Face::Up | Face::Down => Axis::Major,
-        Face::Front | Face::Back => Axis::Minor,
-        Face::Left | Face::Right => Axis::Ignored,
-    })
+fn corner_twist_coord(cube: Cube) -> usize {
+    0
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -230,12 +252,4 @@ enum Axis {
     Major,
     Minor,
     Ignored,
-}
-
-fn domino_face(cube: Cube) -> Cube<Option<Face>> {
-    cube.map(|value| match value {
-        Face::Up | Face::Down => Some(value),
-        Face::Front | Face::Back => Some(value),
-        Face::Left | Face::Right => None,
-    })
 }

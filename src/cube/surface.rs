@@ -212,7 +212,7 @@ impl Cube {
 }
 
 impl<F> Cube<F> {
-    pub fn map<R>(self, mut f: impl FnMut(F) -> R) -> Cube<R> {
+    pub fn map<R>(self, mut f: impl FnMut(F, Cubie) -> R) -> Cube<R> {
         Cube {
             up: self.up.map(&mut f),
             down: self.down.map(&mut f),
@@ -339,8 +339,17 @@ impl Surface {
 }
 
 impl<F> Surface<F> {
-    fn map<R>(self, f: impl FnMut(F) -> R) -> Surface<R> {
-        Surface(self.0.map(f))
+    fn map<R>(self, mut mapper: impl FnMut(F, Cubie) -> R) -> Surface<R> {
+        let mut i = 0;
+        Surface(self.0.map(|f| {
+            let cubie = if i % 2 == 0 {
+                Cubie::Corner
+            } else {
+                Cubie::Edge
+            };
+            i += 1;
+            mapper(f, cubie)
+        }))
     }
 }
 
@@ -380,6 +389,12 @@ impl<'s> SliceMut<'s> {
             self.surface.0[self.indices[i] as usize] = owned.0[i];
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum Cubie {
+    Edge,
+    Corner,
 }
 
 #[cfg(test)]
