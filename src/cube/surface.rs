@@ -1,13 +1,13 @@
 use crate::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Cube {
-    up: Surface,
-    down: Surface,
-    front: Surface,
-    back: Surface,
-    left: Surface,
-    right: Surface,
+pub struct Cube<F = Face> {
+    up: Surface<F>,
+    down: Surface<F>,
+    front: Surface<F>,
+    back: Surface<F>,
+    left: Surface<F>,
+    right: Surface<F>,
 }
 
 impl super::CubeLike for Cube {
@@ -211,6 +211,19 @@ impl Cube {
     }
 }
 
+impl<F> Cube<F> {
+    pub fn map<R>(self, mut f: impl FnMut(F) -> R) -> Cube<R> {
+        Cube {
+            up: self.up.map(&mut f),
+            down: self.down.map(&mut f),
+            left: self.left.map(&mut f),
+            right: self.right.map(&mut f),
+            front: self.front.map(&mut f),
+            back: self.back.map(&mut f),
+        }
+    }
+}
+
 impl std::fmt::Display for Cube {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let slices = |surface: &Surface, face: Face| {
@@ -251,7 +264,7 @@ impl std::fmt::Display for Cube {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-struct Surface([Face; 8]);
+struct Surface<F = Face>([F; 8]);
 
 impl Surface {
     #[inline(never)]
@@ -325,6 +338,12 @@ impl Surface {
     }
 }
 
+impl<F> Surface<F> {
+    fn map<R>(self, f: impl FnMut(F) -> R) -> Surface<R> {
+        Surface(self.0.map(f))
+    }
+}
+
 impl From<Face> for Surface {
     fn from(face: Face) -> Surface {
         Surface([face; 8])
@@ -340,8 +359,8 @@ impl std::fmt::Display for Slice {
     }
 }
 
-struct SliceMut<'s> {
-    surface: &'s mut Surface,
+struct SliceMut<'s, F = Face> {
+    surface: &'s mut Surface<F>,
     indices: [u8; 3],
 }
 
