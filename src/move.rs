@@ -6,16 +6,6 @@ pub struct Move {
     pub direction: Direction,
 }
 
-impl Move {
-    pub fn could_follow(&self, other: &Move) -> bool {
-        if !Face::same_axis(self.face, other.face) {
-            return true;
-        }
-
-        self.face > other.face
-    }
-}
-
 impl core::fmt::Debug for Move {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "{}{}", self.face, self.direction)
@@ -30,6 +20,18 @@ pub enum Direction {
 }
 
 impl Move {
+    pub fn could_follow(&self, other: &Move) -> bool {
+        if !Face::same_axis(self.face, other.face) {
+            return true;
+        }
+
+        self.face > other.face
+    }
+
+    pub fn inverse_seq(seq: &[Move]) -> Vec<Move> {
+        seq.into_iter().rev().map(|m| m.reverse()).collect()
+    }
+
     pub fn parse_sequence(s: &str) -> anyhow::Result<Vec<Move>> {
         s.split(" ").map(|s| s.parse()).collect()
     }

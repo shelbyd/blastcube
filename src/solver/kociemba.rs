@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
-use core::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
+use core::{cmp::Ordering, hash::Hash};
+use std::collections::{hash_map::HashMap, VecDeque};
 
 pub struct Kociemba<E: Evaluator> {
     challenge: Challenge<E>,
@@ -13,12 +13,16 @@ pub struct Kociemba<E: Evaluator> {
 impl<E: Evaluator> Solver<E> for Kociemba<E> {
     fn init(challenge: Challenge<E>) -> Self {
         Kociemba {
-            challenge,
+            to_domino: {
+                let moves = Move::all().collect::<Vec<_>>();
+                Phase::init(moves, is_domino_cube, vec![])
+            },
+            post_domino: {
+                let moves = Move::all().filter(is_domino_move).collect::<Vec<_>>();
+                Phase::init(moves, |c| *c == Cube::solved(), vec![])
+            },
 
-            to_domino: Phase::init(domino_axis, Move::all(), is_domino_cube),
-            post_domino: Phase::init(domino_face, Move::all().filter(is_domino_move), |c| {
-                *c == Cube::solved()
-            }),
+            challenge,
         }
     }
 
@@ -35,26 +39,7 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
 }
 
 impl<E: Evaluator> Kociemba<E> {
-    fn is_domino(&self, cube: &Cube) -> bool {
-        use Face::*;
-
-        Location::all().all(|l| match (l, cube.get(l)) {
-            (Location::Center(_), _) => true,
-
-            (Location::Edge(Up | Down, _), Up | Down) => true,
-            (Location::Corner(Up | Down, _, _), Up | Down) => true,
-
-            (Location::Edge(Front | Back, Left | Right), Front | Back) => true,
-
-            (Location::Edge(Front | Back, _), _) => true,
-            (Location::Edge(Left | Right, _), _) => true,
-            (Location::Corner(Front | Back | Left | Right, _, _), _) => true,
-
-            _ => false,
-        })
-    }
-
-    fn solve_to<F: PartialEq>(&self, cube: &Cube, phase: &Phase<F>) -> Vec<Move> {
+    fn solve_to<F: Eq + Hash>(&self, cube: &Cube, phase: &Phase<F>) -> Vec<Move> {
         let mut best_time = Duration::default();
         loop {
             log::info!("Searching <= {:?}", best_time);
@@ -67,7 +52,7 @@ impl<E: Evaluator> Kociemba<E> {
         }
     }
 
-    fn find_solution<F: PartialEq>(
+    fn find_solution<F: Eq + Hash>(
         &self,
         max_time: Duration,
         cube: &Cube,
@@ -148,40 +133,87 @@ fn is_domino_cube(cube: &Cube) -> bool {
     })
 }
 
-struct Phase<F: 'static> {
-    map: HashMap<Cube<F>, Duration>,
+struct Phase<F: Eq + Hash> {
     allowed_moves: Vec<Move>,
-
-    heuristic_filter: fn(Cube) -> Cube<F>,
     finished_when: fn(&Cube) -> bool,
+    heuristics: Vec<Heuristic<F>>,
 }
 
-impl<F> Phase<F> {
+impl<F: Eq + Hash> Phase<F> {
     fn init(
-        heuristic_filter: fn(Cube) -> Cube<F>,
         allowed_moves: impl IntoIterator<Item = Move>,
         finished_when: fn(&Cube) -> bool,
+        heuristics: Vec<Heuristic<F>>,
     ) -> Self {
-        let mut map = Default::default();
-
-        let mut expand = VecDeque::new();
-        expand.push_back(heuristic_filter(Cube::solved()));
-        while let Some(cube) = expand.pop_front() {}
+        let allowed_moves: Vec<_> = allowed_moves.into_iter().collect();
 
         Self {
-            map,
-            heuristic_filter,
-            allowed_moves: allowed_moves.into_iter().collect(),
+            allowed_moves,
             finished_when,
+            heuristics,
         }
     }
 
     fn min_time(&self, cube: &Cube) -> Duration {
-        Duration::default()
+        self.heuristics
+            .iter()
+            .map(|h| h.min_time(cube))
+            .min()
+            .unwrap_or_default()
     }
 
     fn is_finished(&self, cube: &Cube) -> bool {
         (self.finished_when)(cube)
+    }
+}
+
+struct Heuristic<F: Eq + Hash> {
+    map: HashMap<Cube<F>, Duration>,
+    simplifier: fn(Cube) -> Cube<F>,
+}
+
+impl<F: Eq + Hash> Heuristic<F> {
+    fn init(
+        simplifier: fn(Cube) -> Cube<F>,
+        allowed_moves: &[Move],
+        evaluator: &impl Evaluator,
+    ) -> Self {
+        let allowed_moves: Vec<_> = allowed_moves.into_iter().collect();
+
+        let mut map = HashMap::default();
+
+        let mut explore = VecDeque::new();
+        explore.push_back(Vec::new());
+        while let Some(moves) = explore.pop_front() {
+            if map.len() > 100_000 {
+                break;
+            }
+
+            let cube = simplifier(Cube::solved().apply_all(Move::inverse_seq(&moves)));
+
+            let min_time = evaluator.min_time(&moves);
+            if let Some(t) = map.get(&cube) {
+                if *t < min_time {
+                    continue;
+                }
+            }
+            map.insert(cube, min_time);
+
+            for move_ in allowed_moves.iter() {
+                let mut clone = moves.clone();
+                clone.push(**move_);
+                explore.push_back(clone);
+            }
+        }
+
+        Self { simplifier, map }
+    }
+
+    fn min_time(&self, cube: &Cube) -> Duration {
+        self.map
+            .get(&(self.simplifier)(cube.clone()))
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -193,7 +225,7 @@ fn domino_axis(cube: Cube) -> Cube<Axis> {
     })
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 enum Axis {
     Major,
     Minor,

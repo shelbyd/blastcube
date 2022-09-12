@@ -1,6 +1,5 @@
 use crate::prelude::*;
 
-mod cubie;
 mod facie;
 mod surface;
 
