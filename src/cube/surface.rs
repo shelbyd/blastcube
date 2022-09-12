@@ -202,7 +202,7 @@ impl Cube {
                     (Down, Back, Left) => 6,
                     (Down, Back, Right) => 4,
 
-                    _ => unreachable!(),
+                    _ => unreachable!("{:?}", location),
                 };
 
                 self.surface(s).0[index]
@@ -212,6 +212,7 @@ impl Cube {
 }
 
 impl<F> Cube<F> {
+    #[allow(dead_code)]
     pub fn map<R>(self, mut f: impl FnMut(F, Cubie) -> R) -> Cube<R> {
         Cube {
             up: self.up.map(&mut f),

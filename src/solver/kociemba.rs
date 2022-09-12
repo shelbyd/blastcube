@@ -6,8 +6,8 @@ use std::collections::HashMap;
 pub struct Kociemba<E: Evaluator> {
     challenge: Challenge<E>,
 
-    to_domino: Phase<usize>,
-    post_domino: Phase<Option<Face>>,
+    to_domino: Phase,
+    post_domino: Phase,
 }
 
 impl<E: Evaluator> Solver<E> for Kociemba<E> {
@@ -15,11 +15,11 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
         Kociemba {
             to_domino: {
                 let moves = Move::all().collect::<Vec<_>>();
-                let heuristics = vec![Heuristic::init(
+                let heuristics = vec![Box::new(HeuristicTable::init(
                     corner_twist_coord,
                     &moves,
                     &challenge.evaluator,
-                )];
+                )) as Box<dyn Heuristic>];
                 Phase::init(moves, is_domino_cube, heuristics)
             },
             post_domino: {
@@ -43,15 +43,10 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
 }
 
 impl<E: Evaluator> Kociemba<E> {
-    fn solve_to<F: Eq + Hash>(
-        &self,
-        cube: &Cube,
-        phase: &Phase<F>,
-        mut prefix: Vec<Move>,
-    ) -> Vec<Move> {
+    fn solve_to(&self, cube: &Cube, phase: &Phase, mut prefix: Vec<Move>) -> Vec<Move> {
         let cube = cube.clone().apply_all(prefix.clone());
 
-        let mut best_time = Duration::default();
+        let mut best_time = self.challenge.evaluator.eval(&prefix);
         loop {
             log::info!("Searching <= {:?}", best_time);
             match self.find_solution(best_time, &cube, &mut prefix, phase) {
@@ -63,12 +58,12 @@ impl<E: Evaluator> Kociemba<E> {
         }
     }
 
-    fn find_solution<F: Eq + Hash>(
+    fn find_solution(
         &self,
         max_time: Duration,
         cube: &Cube,
         move_stack: &mut Vec<Move>,
-        phase: &Phase<F>,
+        phase: &Phase,
     ) -> Search {
         let this_time = self.challenge.evaluator.eval(move_stack) + phase.min_time(cube);
         if this_time > max_time {
@@ -144,17 +139,17 @@ fn is_domino_cube(cube: &Cube) -> bool {
     })
 }
 
-struct Phase<F: Eq + Hash> {
+struct Phase {
     allowed_moves: Vec<Move>,
     finished_when: fn(&Cube) -> bool,
-    heuristics: Vec<Heuristic<F>>,
+    heuristics: Vec<Box<dyn Heuristic>>,
 }
 
-impl<F: Eq + Hash> Phase<F> {
+impl Phase {
     fn init(
         allowed_moves: impl IntoIterator<Item = Move>,
         finished_when: fn(&Cube) -> bool,
-        heuristics: Vec<Heuristic<F>>,
+        heuristics: Vec<Box<dyn Heuristic>>,
     ) -> Self {
         Self {
             allowed_moves: allowed_moves.into_iter().collect(),
@@ -176,26 +171,37 @@ impl<F: Eq + Hash> Phase<F> {
     }
 }
 
-struct Heuristic<T: Eq + Hash> {
-    map: HashMap<T, Duration>,
-    simplifier: fn(Cube) -> T,
+trait Heuristic {
+    fn min_time(&self, cube: &Cube) -> Duration;
 }
 
-impl<T: Eq + Hash> Heuristic<T> {
-    fn init(simplifier: fn(Cube) -> T, allowed_moves: &[Move], evaluator: &impl Evaluator) -> Self {
+struct HeuristicTable<T: Eq + Hash> {
+    map: HashMap<T, Duration>,
+    simplifier: fn(&Cube) -> T,
+}
+
+impl<T: Eq + Hash> HeuristicTable<T> {
+    fn init(
+        simplifier: fn(&Cube) -> T,
+        allowed_moves: &[Move],
+        evaluator: &impl Evaluator,
+    ) -> Self {
         let mut result = Self {
             simplifier,
             map: HashMap::default(),
         };
 
         for depth in 0..21 {
-            dbg!(depth, result.map.len());
             if !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves) {
+                log::info!(
+                    "Finished expanding at depth {}, {} items",
+                    depth,
+                    result.map.len()
+                );
                 break;
             }
         }
 
-        dbg!(result.map.len());
         result
     }
 
@@ -206,7 +212,7 @@ impl<T: Eq + Hash> Heuristic<T> {
         evaluator: &impl Evaluator,
         allowed_moves: &[Move],
     ) -> bool {
-        let cube = (self.simplifier)(Cube::solved().apply_all(Move::inverse_seq(move_stack)));
+        let cube = (self.simplifier)(&Cube::solved().apply_all(Move::inverse_seq(move_stack)));
         let time = evaluator.min_time(move_stack);
 
         if depth == 0 {
@@ -233,23 +239,82 @@ impl<T: Eq + Hash> Heuristic<T> {
             any || result
         })
     }
+}
 
+impl<T> Heuristic for HeuristicTable<T>
+where
+    T: Eq + Hash,
+{
     fn min_time(&self, cube: &Cube) -> Duration {
-        // Duration::default()
         self.map
-            .get(&(self.simplifier)(cube.clone()))
+            .get(&(self.simplifier)(cube))
             .cloned()
             .unwrap_or_default()
     }
 }
 
-fn corner_twist_coord(cube: Cube) -> usize {
-    0
+fn corner_twist_coord(cube: &Cube) -> usize {
+    Location::all().fold(0, |v, loc| {
+        let value = match loc {
+            Location::Center(_) | Location::Edge(_, _) => return v,
+            Location::Corner(_, _, _) if !matches!(cube.get(loc), Face::Up | Face::Down) => {
+                return v
+            }
+            Location::Corner(Face::Up | Face::Down, _, _) => 0,
+            Location::Corner(_, Face::Up | Face::Down, _) => 1,
+            Location::Corner(_, _, Face::Up | Face::Down) => 2,
+            Location::Corner(_, _, _) => unreachable!("{:?}", loc),
+        };
+        v * 3 + value
+    })
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-enum Axis {
-    Major,
-    Minor,
-    Ignored,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(test)]
+    mod corner_twitst_coord {
+        use super::*;
+
+        #[test]
+        fn solved_is_zero() {
+            assert_eq!(corner_twist_coord(&Cube::solved()), 0);
+        }
+
+        #[test]
+        fn right_turn_is_non_zero() {
+            assert_ne!(
+                corner_twist_coord(&Cube::solved().apply("R".parse().unwrap())),
+                0
+            );
+        }
+
+        #[test]
+        fn left_is_not_right() {
+            assert_ne!(
+                corner_twist_coord(&Cube::solved().apply("R".parse().unwrap())),
+                corner_twist_coord(&Cube::solved().apply("L".parse().unwrap())),
+            );
+        }
+
+        #[test]
+        fn double_right_is_zero() {
+            assert_eq!(
+                corner_twist_coord(&Cube::solved().apply("R2".parse().unwrap())),
+                0
+            );
+        }
+
+        #[test]
+        fn same_cubies_opposite_twists() {
+            let cw_twist = Move::parse_sequence("L D2 L' F' D2 F U F' D2 F L D2 L'").unwrap();
+            let ccw_twist = Move::parse_sequence("F' D2 F L D2 L' U L D2 L' F' D2 F").unwrap();
+
+            assert_ne!(
+                corner_twist_coord(&Cube::solved().apply_all(cw_twist)),
+                corner_twist_coord(&Cube::solved().apply_all(ccw_twist)),
+            );
+        }
+    }
 }
