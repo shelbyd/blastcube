@@ -7,7 +7,7 @@ pub struct Challenge<E: Evaluator> {
 
 // Other code assumes Evaluators are not super-linear.
 //   E(a) + E(b) <= E(a + b)
-pub trait Evaluator {
+pub trait Evaluator: Sync + Send + 'static {
     fn eval(&self, seq: &[Move]) -> Duration;
 
     fn min_time(&self, _seq: &[Move]) -> Duration {
@@ -17,7 +17,7 @@ pub trait Evaluator {
 
 impl<F> Evaluator for F
 where
-    F: Fn(&[Move]) -> Duration,
+    F: Send + Sync + 'static + Fn(&[Move]) -> Duration,
 {
     fn eval(&self, seq: &[Move]) -> Duration {
         (self)(seq)

@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
         evaluator: |seq: &[_]| Duration::from_millis(100) * (seq.len() as u32),
     };
 
-    let solver = solver::Kociemba::init(challenge);
+    let solver = std::sync::Arc::new(solver::Kociemba::init(challenge));
 
     let started_at = Instant::now();
     let mut result_cube = cube.clone();

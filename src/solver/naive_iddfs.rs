@@ -45,7 +45,7 @@ impl<E: Evaluator> super::Solver<E> for NaiveIddfs<E> {
         NaiveIddfs { challenge }
     }
 
-    fn solve(&self, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
+    fn solve(self: &std::sync::Arc<Self>, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
         (0..)
             .filter_map(|move_depth| self.find_solution(move_depth, &cube, None))
             .map(|seq| Box::new(seq.into_iter()))

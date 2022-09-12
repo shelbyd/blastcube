@@ -12,7 +12,7 @@ impl<E: Evaluator> super::Solver<E> for Mitm<E> {
         Mitm { challenge }
     }
 
-    fn solve(&self, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
+    fn solve(self: &std::sync::Arc<Self>, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
         let mut state = SolveState::default();
         for depth in 0..11usize {
             dbg!(depth);

@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use std::sync::Arc;
 
 mod kociemba;
 pub use kociemba::*;
@@ -12,5 +13,5 @@ pub use mitm::*;
 pub trait Solver<E: Evaluator>: Sized {
     fn init(challenge: Challenge<E>) -> Self;
 
-    fn solve(&self, cube: Cube) -> Box<dyn Iterator<Item = Move>>;
+    fn solve(self: &Arc<Self>, cube: Cube) -> Box<dyn Iterator<Item = Move>>;
 }

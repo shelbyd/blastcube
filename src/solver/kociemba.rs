@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use core::{cmp::Ordering, hash::Hash};
-use std::collections::HashMap;
+use std::{sync::Arc, collections::HashMap, sync::mpsc::channel};
 
 pub struct Kociemba<E: Evaluator> {
     challenge: Challenge<E>,
@@ -31,14 +31,25 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
         }
     }
 
-    fn solve(&self, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
-        log::info!("Finding domino");
-        let to_domino = self.solve_to(&cube, &self.to_domino, Vec::new());
-        log::info!("Domino path: {:?}", to_domino);
+    fn solve(self: &Arc<Self>, cube: Cube) -> Box<dyn Iterator<Item = Move>> {
+        let (tx, rx) = channel();
 
-        log::info!("Finding solution");
-        let solution = self.solve_to(&cube, &self.post_domino, to_domino);
-        Box::new(solution.into_iter())
+        let this = Arc::clone(self);
+        std::thread::spawn(move || {
+            let to_domino = this.solve_to(&cube, &this.to_domino, Vec::new());
+            let domino_len = to_domino.len();
+            for m in &to_domino {
+                tx.send(*m).unwrap();
+            }
+            log::info!("Domino path: {:?}", to_domino);
+
+            let solution = this.solve_to(&cube, &this.post_domino, to_domino);
+            for m in &solution[domino_len..] {
+                tx.send(*m).unwrap();
+            }
+        });
+
+        Box::new(rx.into_iter())
     }
 }
 
@@ -171,7 +182,7 @@ impl Phase {
     }
 }
 
-trait Heuristic {
+trait Heuristic: Sync + Send {
     fn min_time(&self, cube: &Cube) -> Duration;
 }
 
@@ -191,12 +202,14 @@ impl<T: Eq + Hash> HeuristicTable<T> {
             map: HashMap::default(),
         };
 
+        let start = std::time::Instant::now();
         for depth in 0..21 {
             if !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves) {
                 log::info!(
-                    "Finished expanding at depth {}, {} items",
+                    "Finished expanding at depth {}, {} items, took {:?}",
                     depth,
-                    result.map.len()
+                    result.map.len(),
+                    start.elapsed(),
                 );
                 break;
             }
@@ -243,7 +256,7 @@ impl<T: Eq + Hash> HeuristicTable<T> {
 
 impl<T> Heuristic for HeuristicTable<T>
 where
-    T: Eq + Hash,
+    T: Eq + Hash + Sync + Send,
 {
     fn min_time(&self, cube: &Cube) -> Duration {
         self.map
