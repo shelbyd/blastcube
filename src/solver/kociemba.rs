@@ -35,7 +35,9 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
         let (tx, rx) = channel();
 
         let this = Arc::clone(self);
+        let before_spawn = std::time::Instant::now();
         std::thread::spawn(move || {
+            log::info!("Took {:?} to spawn worker thread", before_spawn.elapsed());
             let to_domino = this.solve_to(&cube, &this.to_domino, Vec::new());
             let domino_len = to_domino.len();
             for m in &to_domino {
