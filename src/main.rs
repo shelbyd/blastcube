@@ -1,8 +1,18 @@
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck_macros;
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck_derive;
+
 mod blast_machine_evaluator;
 mod challenge;
 mod cube;
 mod r#move;
 mod solver;
+
+#[cfg(test)]
+mod test;
 
 mod prelude;
 use prelude::*;
@@ -13,7 +23,7 @@ fn main() -> anyhow::Result<()> {
     simple_logger::SimpleLogger::new().init().unwrap();
 
     let scrambles = [
-        "R2 U' L2 R2 B2 F2 L2 F2 U' L' B D F R2",
+        "R2 U' L2 R2 B2 F2 L2 U' L' B D F R2 L2",
         "R2 U' L' R2 B2 F' L F2 U2 L' U' B D U2 L2 D2 U R' B F' L R F U R2 B' F2 L2 U' L",
     ]
     .into_iter()

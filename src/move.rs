@@ -1,6 +1,7 @@
 use crate::cube::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Move {
     pub face: Face,
     pub direction: Direction,
@@ -12,7 +13,8 @@ impl core::fmt::Debug for Move {
     }
 }
 
-#[derive(Clone, Copy, Debug, enum_iterator::Sequence)]
+#[derive(Clone, Copy, Debug, enum_iterator::Sequence, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub enum Direction {
     Single,
     Double,
@@ -26,6 +28,13 @@ impl Move {
         }
 
         self.face > other.face
+    }
+
+    pub fn should_consider(seq: &[Move]) -> bool {
+        seq.windows(2).all(|w| match w {
+            [a, b] => b.could_follow(a),
+            _ => unreachable!(),
+        })
     }
 
     pub fn inverse_seq(seq: &[Move]) -> Vec<Move> {

@@ -16,6 +16,7 @@ pub trait CubeLike: Sized + core::fmt::Debug + Eq {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug, enum_iterator::Sequence)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub enum Face {
     Front,
     Back,
