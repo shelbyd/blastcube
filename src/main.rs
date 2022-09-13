@@ -1,3 +1,4 @@
+mod blast_machine_evaluator;
 mod challenge;
 mod cube;
 mod r#move;
@@ -12,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     simple_logger::SimpleLogger::new().init().unwrap();
 
     let scrambles = [
-        "R2 U' L2 R2 B2 F2 L2 F2 U' L' B D F R2 F",
+        "R2 U' L2 R2 B2 F2 L2 F2 U' L' B D F R2",
         "R2 U' L' R2 B2 F' L F2 U2 L' U' B D U2 L2 D2 U R' B F' L R F U R2 B' F2 L2 U' L",
     ]
     .into_iter()
@@ -33,9 +34,12 @@ fn main() -> anyhow::Result<()> {
     let cube = Cube::solved().apply_all(scramble.iter().cloned());
     log::info!("initial cube:\n{}", cube);
 
+    let evaluator = blast_machine_evaluator::BlastMachineEvaluator;
+    // |seq: &[_]| Duration::from_millis(100) * (seq.len() as u32),
+
     let challenge = Challenge {
         inspection: Duration::default(),
-        evaluator: |seq: &[_]| Duration::from_millis(100) * (seq.len() as u32),
+        evaluator: evaluator.clone(),
     };
 
     let solver = std::sync::Arc::new(solver::Kociemba::init(challenge));
@@ -44,9 +48,11 @@ fn main() -> anyhow::Result<()> {
     let mut result_cube = cube.clone();
 
     log::info!("Starting solve");
+    let mut moves = Vec::new();
     for move_ in solver.solve(cube) {
         result_cube = result_cube.apply(move_);
         log::info!("{:?} - {}", started_at.elapsed(), move_);
+        moves.push(move_);
     }
 
     if result_cube == Cube::solved() {
@@ -55,6 +61,7 @@ fn main() -> anyhow::Result<()> {
         log::info!("DNF in {:?}", started_at.elapsed());
         log::info!("final cube:\n{}", result_cube);
     }
+    log::info!("Evaluator(moves) = {:?}", evaluator.eval(&moves));
 
     Ok(())
 }

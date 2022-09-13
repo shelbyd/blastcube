@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use core::{cmp::Ordering, hash::Hash};
-use std::{sync::Arc, collections::HashMap, sync::mpsc::channel};
+use std::{collections::HashMap, sync::mpsc::channel, sync::Arc};
 
 pub struct Kociemba<E: Evaluator> {
     challenge: Challenge<E>,
@@ -230,21 +230,24 @@ impl<T: Eq + Hash> HeuristicTable<T> {
         let cube = (self.simplifier)(&Cube::solved().apply_all(Move::inverse_seq(move_stack)));
         let time = evaluator.min_time(move_stack);
 
-        if depth == 0 {
-            if let Some(t) = self.map.get(&cube) {
-                if *t <= time {
-                    return false;
-                }
-            }
-
+        let already = self.map.get(&cube);
+        let should_insert = match already {
+            None => true,
+            Some(t) => time < *t,
+        };
+        if should_insert {
+            assert_eq!(depth, 0);
             self.map.insert(cube, time);
             return true;
         }
 
-        if let Some(t) = self.map.get(&cube) {
-            if *t < time {
-                return false;
-            }
+        let should_break = depth == 0
+            || match already {
+                None => false,
+                Some(t) => *t < time,
+            };
+        if should_break {
+            return false;
         }
 
         allowed_moves.iter().fold(false, |any, move_| {
