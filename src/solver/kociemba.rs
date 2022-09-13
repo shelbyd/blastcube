@@ -1,3 +1,4 @@
+use crate::cube::coord;
 use crate::prelude::*;
 
 use core::{cmp::Ordering, hash::Hash};
@@ -18,14 +19,14 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
                 let heuristics: Vec<Box<dyn Heuristic>> = vec![
                     Box::new(HeuristicTable::init(
                         "corner_orientation",
-                        corner_orientation,
+                        coord::corner_orientation,
                         &moves,
                         &challenge.evaluator,
                         None,
                     )),
                     Box::new(HeuristicTable::init(
                         "edge_orientation",
-                        edge_orientation,
+                        coord::edge_orientation,
                         &moves,
                         &challenge.evaluator,
                         None,
@@ -241,7 +242,7 @@ impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
                 Some(max) if start.elapsed() >= max => {
                     result.exhaustive = false;
                     true
-                },
+                }
                 _ => !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves),
             };
             if should_break {
@@ -324,220 +325,9 @@ where
     }
 }
 
-fn corner_orientation(cube: &Cube) -> u32 {
-    let mut count = 0;
-    let value = Location::all().fold(0, |v, loc| {
-        let value = match loc {
-            Location::Center(_) | Location::Edge(_, _) => return v,
-
-            // Skip the BRD cubie
-            Location::Corner(
-                Face::Back | Face::Right | Face::Down,
-                Face::Back | Face::Right | Face::Down,
-                Face::Back | Face::Right | Face::Down,
-            ) => return v,
-
-            Location::Corner(_, _, _) if !matches!(cube.get(loc), Face::Up | Face::Down) => {
-                return v
-            }
-            Location::Corner(Face::Up | Face::Down, _, _) => 0,
-            Location::Corner(Face::Front | Face::Back, _, _) => 1,
-            Location::Corner(Face::Left | Face::Right, _, _) => 2,
-        };
-        count += 1;
-        v * 3 + value
-    });
-    // We skip the BRD cubie
-    assert_eq!(count, 7);
-    value
-}
-
-fn edge_orientation(cube: &Cube) -> u32 {
-    use Axis::*;
-
-    let mut count = 0;
-    let value = Location::all()
-        .filter_map(|loc| match loc {
-            Location::Center(_) | Location::Corner(_, _, _) => None,
-            Location::Edge(Face::Back | Face::Right, Face::Back | Face::Right) => None,
-            Location::Edge(ma, mi) => Some((ma, mi)),
-        })
-        .filter_map(|(major, minor)| {
-            let this_face = cube.get(Location::Edge(major, minor));
-            let other_face = cube.get(Location::Edge(minor, major));
-
-            let v = match (
-                this_face.into(),
-                other_face.into(),
-                major.into(),
-                minor.into(),
-            ) {
-                (_, UD, _, _) => return None,
-
-                (UD, _, UD, _) => true,
-                (UD, _, FB, LR) => true,
-                (UD, _, _, _) => false,
-
-                (_, FB, _, _) => return None,
-
-                (FB, LR, UD, _) => true,
-                (FB, LR, FB, LR) => true,
-                (FB, LR, _, _) => false,
-
-                (LR, _, _, _) => return None,
-            };
-            Some(v)
-        })
-        .inspect(|_| count += 1)
-        .fold(0, |v, is_good| v * 2 + if is_good { 0 } else { 1 });
-
-    // We skip the BR edge.
-    assert_eq!(count, 11);
-
-    value
-}
-
-enum Axis {
-    FB,
-    UD,
-    LR,
-}
-
-impl From<Face> for Axis {
-    fn from(face: Face) -> Self {
-        match face {
-            Face::Up | Face::Down => Axis::UD,
-            Face::Front | Face::Back => Axis::FB,
-            Face::Left | Face::Right => Axis::LR,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn random_cubes(count: usize, mut f: impl FnMut(&Cube) -> ()) {
-        use rand::seq::*;
-        let mut rng = rand::thread_rng();
-
-        let mut cube = Cube::solved();
-        for _ in 0..count {
-            let move_ = Move::all().choose(&mut rng).unwrap();
-            cube = cube.apply(move_);
-            f(&cube);
-        }
-    }
-
-    #[cfg(test)]
-    mod corner_orientation {
-        use super::*;
-
-        #[test]
-        fn solved_is_zero() {
-            assert_eq!(corner_orientation(&Cube::solved()), 0);
-        }
-
-        #[test]
-        fn right_turn_is_non_zero() {
-            assert_ne!(
-                corner_orientation(&Cube::solved().apply("R".parse().unwrap())),
-                0
-            );
-        }
-
-        #[test]
-        fn left_is_not_right() {
-            assert_ne!(
-                corner_orientation(&Cube::solved().apply("R".parse().unwrap())),
-                corner_orientation(&Cube::solved().apply("L".parse().unwrap())),
-            );
-        }
-
-        #[test]
-        fn double_right_is_zero() {
-            assert_eq!(
-                corner_orientation(&Cube::solved().apply("R2".parse().unwrap())),
-                0
-            );
-        }
-
-        #[test]
-        fn double_back_not_double_front() {
-            assert_ne!(
-                corner_orientation(
-                    &Cube::solved().apply_all(Move::parse_sequence("R' F2").unwrap())
-                ),
-                corner_orientation(
-                    &Cube::solved().apply_all(Move::parse_sequence("R' B2").unwrap())
-                ),
-            );
-        }
-
-        #[test]
-        fn opposite_twists() {
-            let cw = cube_with_moves("L D2 L' F' D2 F U F' D2 F L D2 L' U'");
-            let ccw = cube_with_moves("F' D2 F L D2 L' U L D2 L' F' D2 F U'");
-
-            assert_ne!(corner_orientation(&cw), corner_orientation(&ccw));
-        }
-    }
-
-    #[cfg(test)]
-    mod edge_orientation {
-        use super::*;
-
-        #[test]
-        fn down_is_zero() {
-            assert_eq!(
-                edge_orientation(&Cube::solved().apply("D".parse().unwrap())),
-                0
-            );
-        }
-
-        #[test]
-        fn front_is_not_zero() {
-            assert_ne!(
-                edge_orientation(&Cube::solved().apply("F".parse().unwrap())),
-                0
-            );
-        }
-
-        #[test]
-        fn front_is_less_than_2048() {
-            assert!(edge_orientation(&Cube::solved().apply("F".parse().unwrap())) < 2048);
-        }
-
-        #[test]
-        fn sequence_less_than_2048() {
-            assert!(
-                edge_orientation(
-                    &Cube::solved().apply_all(Move::parse_sequence("D' F B'").unwrap())
-                ) < 2048
-            );
-        }
-
-        #[test]
-        fn all_domino_moves_are_zero() {
-            use rand::seq::*;
-            let mut rng = rand::thread_rng();
-
-            let mut cube = Cube::solved();
-            for _ in 0..100_000 {
-                let move_ = domino_moves().choose(&mut rng).unwrap();
-                cube = cube.apply(move_);
-                assert_eq!(edge_orientation(&cube), 0, "{}\n{}", move_, cube);
-            }
-        }
-
-        #[test]
-        fn always_less_than_2_pow_11() {
-            random_cubes(100_000, |cube| {
-                let coord = edge_orientation(&cube);
-                assert!(coord < 2u32.pow(11), "{}\n{}", coord, cube);
-            });
-        }
-    }
 
     #[cfg(test)]
     mod heuristic_table {
@@ -550,7 +340,7 @@ mod tests {
         lazy_static::lazy_static! {
             static ref CORNER_ORIENTATION: HeuristicTable<u32> = HeuristicTable::init(
                 "corner_orientation",
-                corner_orientation,
+                coord::corner_orientation,
                 &Move::all().collect::<Vec<_>>(),
                 &simple_evaluator,
                 None,

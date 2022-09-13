@@ -1,5 +1,6 @@
 use crate::prelude::*;
 
+pub mod coord;
 mod facie;
 mod surface;
 
