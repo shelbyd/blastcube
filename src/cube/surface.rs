@@ -254,7 +254,6 @@ impl std::fmt::Display for Cube {
 struct Surface<F = Face>([F; 8]);
 
 impl Surface {
-    #[inline(never)]
     fn rotate(&mut self) {
         unsafe {
             let as_int: u64 = std::mem::transmute(*self);
@@ -263,7 +262,6 @@ impl Surface {
         }
     }
 
-    #[inline(never)]
     fn rotate_reverse(&mut self) {
         unsafe {
             let as_int: u64 = std::mem::transmute(*self);
@@ -272,7 +270,6 @@ impl Surface {
         }
     }
 
-    #[inline(never)]
     fn rotate_double(&mut self) {
         unsafe {
             let as_int: u64 = std::mem::transmute(*self);
@@ -289,7 +286,6 @@ impl Surface {
         self.slice_mut(0, 1, 2)
     }
 
-    #[inline(always)]
     fn slice_mut<'s>(&'s mut self, first: u8, second: u8, third: u8) -> SliceMut<'s> {
         assert!((first as usize) < self.0.len());
         assert!((second as usize) < self.0.len());

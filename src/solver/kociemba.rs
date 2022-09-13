@@ -223,7 +223,7 @@ impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
     ) -> Self {
         let mut result = Self {
             name: name.to_string(),
-            exhaustive: max_setup.is_none(),
+            exhaustive: true,
 
             simplifier,
             map: HashMap::default(),
@@ -238,7 +238,10 @@ impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
                 result.map.len()
             );
             let should_break = match max_setup {
-                Some(max) if start.elapsed() >= max => true,
+                Some(max) if start.elapsed() >= max => {
+                    result.exhaustive = false;
+                    true
+                },
                 _ => !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves),
             };
             if should_break {
