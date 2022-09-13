@@ -15,15 +15,33 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
         Kociemba {
             to_domino: {
                 let moves = Move::all().collect::<Vec<_>>();
-                let heuristics = vec![Box::new(HeuristicTable::init(
-                    corner_twist_coord,
-                    &moves,
-                    &challenge.evaluator,
-                )) as Box<dyn Heuristic>];
+                let heuristics: Vec<Box<dyn Heuristic>> = vec![
+                    Box::new(HeuristicTable::init(
+                        "corner_orientation",
+                        corner_orientation_coord,
+                        &moves,
+                        &challenge.evaluator,
+                        None,
+                    )),
+                    Box::new(HeuristicTable::init(
+                        "ud_edge_orientation",
+                        ud_edge_orientation,
+                        &moves,
+                        &challenge.evaluator,
+                        Some(Duration::from_millis(2000)),
+                    )),
+                    Box::new(HeuristicTable::init(
+                        "edge_orientation_coord",
+                        edge_orientation_coord,
+                        &moves,
+                        &challenge.evaluator,
+                        Some(Duration::from_millis(2000)),
+                    )),
+                ];
                 Phase::init(moves, is_domino_cube, heuristics)
             },
             post_domino: {
-                let moves = Move::all().filter(is_domino_move).collect::<Vec<_>>();
+                let moves = domino_moves().collect::<Vec<_>>();
                 Phase::init(moves, |c| *c == Cube::solved(), vec![])
             },
 
@@ -125,6 +143,10 @@ enum Search {
     Found(Vec<Move>),
 }
 
+fn domino_moves() -> impl Iterator<Item = Move> {
+    Move::all().filter(is_domino_move)
+}
+
 fn is_domino_move(m: &Move) -> bool {
     match (m.face, m.direction) {
         (Face::Up | Face::Down, _) => true,
@@ -189,24 +211,35 @@ trait Heuristic: Sync + Send {
 }
 
 struct HeuristicTable<T: Eq + Hash> {
+    #[allow(dead_code)]
+    name: String,
+
     map: HashMap<T, Duration>,
     simplifier: fn(&Cube) -> T,
 }
 
-impl<T: Eq + Hash> HeuristicTable<T> {
+impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
     fn init(
+        name: &str,
         simplifier: fn(&Cube) -> T,
         allowed_moves: &[Move],
         evaluator: &impl Evaluator,
+        max_setup: Option<Duration>,
     ) -> Self {
         let mut result = Self {
+            name: name.to_string(),
             simplifier,
             map: HashMap::default(),
         };
 
         let start = std::time::Instant::now();
         for depth in 0..21 {
-            if !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves) {
+            log::info!("Expanding to depth: {}, {} items", depth, result.map.len());
+            let should_break = match max_setup {
+                Some(max) if start.elapsed() >= max => true,
+                _ => !result.expand_to_depth(depth, &mut Vec::new(), evaluator, allowed_moves),
+            };
+            if should_break {
                 log::info!(
                     "Finished expanding at depth {}, {} items, took {:?}",
                     depth,
@@ -227,35 +260,29 @@ impl<T: Eq + Hash> HeuristicTable<T> {
         evaluator: &impl Evaluator,
         allowed_moves: &[Move],
     ) -> bool {
-        let cube = (self.simplifier)(&Cube::solved().apply_all(Move::inverse_seq(move_stack)));
+        let value = (self.simplifier)(&Cube::solved().apply_all(Move::inverse_seq(move_stack)));
         let time = evaluator.min_time(move_stack);
 
-        let already = self.map.get(&cube);
-        let should_insert = match already {
-            None => true,
-            Some(t) => time < *t,
-        };
-        if should_insert {
-            assert_eq!(depth, 0);
-            self.map.insert(cube, time);
-            return true;
+        let already = self.map.get(&value);
+        match (depth, already) {
+            (0, None) => {
+                self.map.insert(value, time);
+                true
+            }
+            (0, Some(t)) if time < *t => {
+                self.map.insert(value, time);
+                true
+            }
+            (0, Some(_)) => false,
+            (_, Some(t)) if *t < time => false,
+            (_, Some(_)) => allowed_moves.iter().fold(false, |any, move_| {
+                move_stack.push(*move_);
+                let result = self.expand_to_depth(depth - 1, move_stack, evaluator, allowed_moves);
+                move_stack.pop();
+                any || result
+            }),
+            (_, None) => unreachable!(),
         }
-
-        let should_break = depth == 0
-            || match already {
-                None => false,
-                Some(t) => *t < time,
-            };
-        if should_break {
-            return false;
-        }
-
-        allowed_moves.iter().fold(false, |any, move_| {
-            move_stack.push(*move_);
-            let result = self.expand_to_depth(depth - 1, move_stack, evaluator, allowed_moves);
-            move_stack.pop();
-            any || result
-        })
     }
 }
 
@@ -264,14 +291,16 @@ where
     T: Eq + Hash + Sync + Send,
 {
     fn min_time(&self, cube: &Cube) -> Duration {
-        self.map
-            .get(&(self.simplifier)(cube))
-            .cloned()
-            .unwrap_or_default()
+        if let Some(d) = self.map.get(&(self.simplifier)(cube)) {
+            return *d;
+        }
+
+        // log::debug!("{}: missing value for cube", self.name);
+        Duration::default()
     }
 }
 
-fn corner_twist_coord(cube: &Cube) -> usize {
+fn corner_orientation_coord(cube: &Cube) -> u32 {
     Location::all().fold(0, |v, loc| {
         let value = match loc {
             Location::Center(_) | Location::Edge(_, _) => return v,
@@ -287,23 +316,98 @@ fn corner_twist_coord(cube: &Cube) -> usize {
     })
 }
 
+fn ud_edge_orientation(cube: &Cube) -> u32 {
+    Location::all().fold(0, |v, loc| {
+        let value = match loc {
+            Location::Center(_) | Location::Corner(_, _, _) => return v,
+            Location::Edge(_, _) if !matches!(cube.get(loc), Face::Up | Face::Down) => return v,
+            Location::Edge(Face::Up | Face::Down, _) => 0,
+            Location::Edge(Face::Left | Face::Right, _) => 1,
+            Location::Edge(Face::Front | Face::Back, _) => 2,
+        };
+        v * 3 + value
+    })
+}
+
+fn edge_orientation_coord(cube: &Cube) -> u32 {
+    use Axis::*;
+
+    let mut count = 0;
+    let value = Location::all()
+        .filter_map(|loc| match loc {
+            Location::Center(_) | Location::Corner(_, _, _) => None,
+            Location::Edge(Face::Back | Face::Right, Face::Back | Face::Right) => None,
+            Location::Edge(ma, mi) => Some((ma, mi)),
+        })
+        .filter_map(|(major, minor)| {
+            let this_face = cube.get(Location::Edge(major, minor));
+            let other_face = cube.get(Location::Edge(minor, major));
+
+            let v = match (
+                this_face.into(),
+                other_face.into(),
+                major.into(),
+                minor.into(),
+            ) {
+                (_, UD, _, _) => return None,
+
+                (UD, _, UD, _) => true,
+                (UD, _, FB, LR) => true,
+                (UD, _, _, _) => false,
+
+                (_, FB, _, _) => return None,
+
+                (FB, LR, UD, _) => true,
+                (FB, LR, FB, LR) => true,
+                (FB, LR, _, _) => false,
+
+                (LR, _, _, _) => return None,
+            };
+            // dbg!((this_face, other_face, major, minor));
+            Some(v)
+        })
+        .inspect(|_| count += 1)
+        .fold(0, |v, is_good| v * 2 + if is_good { 0 } else { 1 });
+
+    // We skip the BR edge.
+    assert_eq!(count, 11);
+
+    value
+}
+
+enum Axis {
+    FB,
+    UD,
+    LR,
+}
+
+impl From<Face> for Axis {
+    fn from(face: Face) -> Self {
+        match face {
+            Face::Up | Face::Down => Axis::UD,
+            Face::Front | Face::Back => Axis::FB,
+            Face::Left | Face::Right => Axis::LR,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[cfg(test)]
-    mod corner_twitst_coord {
+    mod corner_orientation_coord {
         use super::*;
 
         #[test]
         fn solved_is_zero() {
-            assert_eq!(corner_twist_coord(&Cube::solved()), 0);
+            assert_eq!(corner_orientation_coord(&Cube::solved()), 0);
         }
 
         #[test]
         fn right_turn_is_non_zero() {
             assert_ne!(
-                corner_twist_coord(&Cube::solved().apply("R".parse().unwrap())),
+                corner_orientation_coord(&Cube::solved().apply("R".parse().unwrap())),
                 0
             );
         }
@@ -311,28 +415,92 @@ mod tests {
         #[test]
         fn left_is_not_right() {
             assert_ne!(
-                corner_twist_coord(&Cube::solved().apply("R".parse().unwrap())),
-                corner_twist_coord(&Cube::solved().apply("L".parse().unwrap())),
+                corner_orientation_coord(&Cube::solved().apply("R".parse().unwrap())),
+                corner_orientation_coord(&Cube::solved().apply("L".parse().unwrap())),
             );
         }
 
         #[test]
         fn double_right_is_zero() {
             assert_eq!(
-                corner_twist_coord(&Cube::solved().apply("R2".parse().unwrap())),
+                corner_orientation_coord(&Cube::solved().apply("R2".parse().unwrap())),
                 0
             );
         }
 
         #[test]
         fn same_cubies_opposite_twists() {
-            let cw_twist = Move::parse_sequence("L D2 L' F' D2 F U F' D2 F L D2 L'").unwrap();
-            let ccw_twist = Move::parse_sequence("F' D2 F L D2 L' U L D2 L' F' D2 F").unwrap();
+            let cw_twist = Move::parse_sequence("L D2 L' F' D2 F U F' D2 F L D2 L' U'").unwrap();
+            let ccw_twist = Move::parse_sequence("F' D2 F L D2 L' U L D2 L' F' D2 F U").unwrap();
 
             assert_ne!(
-                corner_twist_coord(&Cube::solved().apply_all(cw_twist)),
-                corner_twist_coord(&Cube::solved().apply_all(ccw_twist)),
+                corner_orientation_coord(&Cube::solved().apply_all(cw_twist)),
+                corner_orientation_coord(&Cube::solved().apply_all(ccw_twist)),
             );
+        }
+    }
+
+    #[cfg(test)]
+    mod edge_orientation_coord {
+        use super::*;
+
+        #[test]
+        fn down_is_zero() {
+            assert_eq!(
+                edge_orientation_coord(&Cube::solved().apply("D".parse().unwrap())),
+                0
+            );
+        }
+
+        #[test]
+        fn front_is_not_zero() {
+            assert_ne!(
+                edge_orientation_coord(&Cube::solved().apply("F".parse().unwrap())),
+                0
+            );
+        }
+
+        #[test]
+        fn front_is_less_than_2048() {
+            assert!(edge_orientation_coord(&Cube::solved().apply("F".parse().unwrap())) < 2048);
+        }
+
+        #[test]
+        fn sequence_less_than_2048() {
+            assert!(
+                edge_orientation_coord(
+                    &Cube::solved().apply_all(Move::parse_sequence("D' F B'").unwrap())
+                ) < 2048
+            );
+        }
+
+        #[test]
+        fn all_domino_moves_are_zero() {
+            use rand::seq::*;
+            let mut rng = rand::thread_rng();
+
+            let mut cube = Cube::solved();
+            for _ in 0..100_000 {
+                let move_ = domino_moves().choose(&mut rng).unwrap();
+                cube = cube.apply(move_);
+                assert_eq!(edge_orientation_coord(&cube), 0, "{}\n{}", move_, cube);
+            }
+        }
+
+        #[test]
+        fn always_less_than_2_pow_11() {
+            use rand::seq::*;
+            let mut rng = rand::thread_rng();
+
+            let mut cube = Cube::solved();
+            for _ in 0..100_000 {
+                let move_ = Move::all().choose(&mut rng).unwrap();
+                cube = cube.apply(move_);
+                dbg!(move_);
+                eprintln!("{}", cube);
+                let coord = edge_orientation_coord(&cube);
+                assert!(coord < 2u32.pow(11), "{}\n{}", coord, cube);
+            }
         }
     }
 }

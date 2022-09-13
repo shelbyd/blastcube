@@ -4,7 +4,7 @@ mod facie;
 mod surface;
 
 pub use facie::Location;
-pub use surface::{Cube, Cubie};
+pub use surface::Cube;
 
 pub trait CubeLike: Sized + core::fmt::Debug + Eq {
     fn solved() -> Self;

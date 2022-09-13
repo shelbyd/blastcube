@@ -6,7 +6,7 @@ pub struct BlastMachineEvaluator;
 impl Evaluator for BlastMachineEvaluator {
     fn eval(&self, seq: &[Move]) -> Duration {
         let single_move_time = Duration::from_millis(10);
-        let double_move_time = Duration::from_millis(16);
+        let double_move_time = Duration::from_millis(14);
 
         let mut last_move: Option<Move> = None;
         seq.into_iter()

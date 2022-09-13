@@ -43,18 +43,18 @@ impl Cube {
 
         match move_.direction {
             Direction::Single => {
-                let first = slices[0].owned();
-                slices[0].set(slices[1].owned());
-                slices[1].set(slices[2].owned());
-                slices[2].set(slices[3].owned());
-                slices[3].set(first);
-            }
-            Direction::Reverse => {
                 let last = slices[3].owned();
                 slices[3].set(slices[2].owned());
                 slices[2].set(slices[1].owned());
                 slices[1].set(slices[0].owned());
                 slices[0].set(last);
+            }
+            Direction::Reverse => {
+                let first = slices[0].owned();
+                slices[0].set(slices[1].owned());
+                slices[1].set(slices[2].owned());
+                slices[2].set(slices[3].owned());
+                slices[3].set(first);
             }
             Direction::Double => {
                 let temp = slices[0].owned();
@@ -211,20 +211,6 @@ impl Cube {
     }
 }
 
-impl<F> Cube<F> {
-    #[allow(dead_code)]
-    pub fn map<R>(self, mut f: impl FnMut(F, Cubie) -> R) -> Cube<R> {
-        Cube {
-            up: self.up.map(&mut f),
-            down: self.down.map(&mut f),
-            left: self.left.map(&mut f),
-            right: self.right.map(&mut f),
-            front: self.front.map(&mut f),
-            back: self.back.map(&mut f),
-        }
-    }
-}
-
 impl std::fmt::Display for Cube {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let slices = |surface: &Surface, face: Face| {
@@ -339,21 +325,6 @@ impl Surface {
     }
 }
 
-impl<F> Surface<F> {
-    fn map<R>(self, mut mapper: impl FnMut(F, Cubie) -> R) -> Surface<R> {
-        let mut i = 0;
-        Surface(self.0.map(|f| {
-            let cubie = if i % 2 == 0 {
-                Cubie::Corner
-            } else {
-                Cubie::Edge
-            };
-            i += 1;
-            mapper(f, cubie)
-        }))
-    }
-}
-
 impl From<Face> for Surface {
     fn from(face: Face) -> Surface {
         Surface([face; 8])
@@ -392,19 +363,13 @@ impl<'s> SliceMut<'s> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum Cubie {
-    Edge,
-    Corner,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use Face::*;
 
     #[test]
     fn rotate_surface() {
-        use Face::*;
         let mut surface = Surface([Left, Left, Up, Up, Right, Right, Down, Down]);
         surface.rotate();
         assert_eq!(
@@ -415,7 +380,6 @@ mod tests {
 
     #[test]
     fn rotate_surface_reverse() {
-        use Face::*;
         let mut surface = Surface([Left, Left, Up, Up, Right, Right, Down, Down]);
         surface.rotate_reverse();
         assert_eq!(
@@ -426,12 +390,30 @@ mod tests {
 
     #[test]
     fn rotate_surface_double() {
-        use Face::*;
         let mut surface = Surface([Left, Left, Up, Up, Right, Right, Down, Down]);
         surface.rotate_double();
         assert_eq!(
             surface,
             Surface([Right, Right, Down, Down, Left, Left, Up, Up])
+        );
+    }
+
+    #[test]
+    fn rotate_cube() {
+        let cube = Cube::solved().apply("F".parse().unwrap());
+        assert_eq!(cube.up, Surface([Up, Up, Up, Up, Left, Left, Left, Up]));
+    }
+
+    #[test]
+    fn two_cube_moves() {
+        let cube = Cube::solved().apply_all(Move::parse_sequence("F R2").unwrap());
+        assert_eq!(
+            cube.up,
+            Surface([Up, Up, Right, Down, Down, Left, Left, Up])
+        );
+        assert_eq!(
+            cube.right,
+            Surface([Right, Right, Up, Up, Up, Right, Right, Right])
         );
     }
 }
