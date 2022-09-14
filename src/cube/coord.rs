@@ -1,9 +1,6 @@
 use crate::prelude::*;
 
-use std::collections::{
-    hash_map::{Entry, HashMap},
-    VecDeque,
-};
+use std::collections::hash_map::{Entry, HashMap};
 
 /// Kociemba-style coordinate cubes.
 
@@ -239,26 +236,35 @@ struct SingleTable(HashMap<Move, HashMap<u16, u16>>);
 
 impl SingleTable {
     fn populate_with(&mut self, name: &str, f: impl Fn(&Cube) -> u16) {
+        use std::time::Instant;
+
         let start = std::time::Instant::now();
         log::info!("Populating transition table {}", name);
 
-        let mut to_expand = VecDeque::new();
-        to_expand.push_back(Cube::solved());
+        let mut to_expand = Vec::from([Cube::solved()]);
 
-        while let Some(from) = to_expand.pop_front() {
+        let log_every = Duration::from_millis(100);
+        let mut last_log = Instant::now();
+        while let Some(from) = to_expand.pop() {
+            if last_log.elapsed() >= log_every {
+                last_log += log_every;
+                log::info!("to_expand.len(): {}", to_expand.len());
+            }
+
             for m in Move::all() {
                 let to = from.clone().apply(m);
 
                 if self.insert(f(&from), m, f(&to)) {
-                    to_expand.push_back(to);
+                    to_expand.push(to);
                 }
             }
         }
 
         log::info!(
-            "Finished populating transition table {}, took {:?}",
+            "Finished populating transition table {}, took {:?}, {} items",
             name,
-            start.elapsed()
+            start.elapsed(),
+            self.len(),
         );
     }
 
@@ -277,6 +283,10 @@ impl SingleTable {
                 false
             }
         }
+    }
+
+    fn len(&self) -> usize {
+        self.0.values().map(|v| v.len()).sum()
     }
 }
 
