@@ -10,8 +10,11 @@ use std::collections::{
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CoordCube {
     pub raw: Cube,
+
     corner_orientation: u16,
     edge_orientation: u16,
+
+    corner_position: u16,
 }
 
 impl From<Cube> for CoordCube {
@@ -19,6 +22,8 @@ impl From<Cube> for CoordCube {
         CoordCube {
             corner_orientation: corner_orientation(&raw),
             edge_orientation: edge_orientation(&raw),
+            corner_position: corner_position(&raw),
+
             raw,
         }
     }
@@ -34,10 +39,13 @@ impl CoordCube {
 
         self.corner_orientation = TRANSITION_TABLE
             .corner_orientation
-            .get(move_, self.corner_orientation);
+            .get(self.corner_orientation, move_);
         self.edge_orientation = TRANSITION_TABLE
             .edge_orientation
-            .get(move_, self.edge_orientation);
+            .get(self.edge_orientation, move_);
+        self.corner_position = TRANSITION_TABLE
+            .corner_position
+            .get(self.corner_position, move_);
 
         self
     }
@@ -48,6 +56,10 @@ impl CoordCube {
 
     pub fn edge_orientation(&self) -> u16 {
         self.edge_orientation
+    }
+
+    pub fn corner_position(&self) -> u16 {
+        self.corner_position
     }
 }
 
@@ -71,7 +83,7 @@ impl From<Face> for Axis {
     }
 }
 
-pub fn corner_orientation(cube: &Cube) -> u16 {
+fn corner_orientation(cube: &Cube) -> u16 {
     let mut count = 0;
     let value = Location::all().fold(0, |v, loc| {
         let value = match loc {
@@ -99,7 +111,60 @@ pub fn corner_orientation(cube: &Cube) -> u16 {
     value
 }
 
-pub fn edge_orientation(cube: &Cube) -> u16 {
+fn corner_position(cube: &Cube) -> u16 {
+    use Face::*;
+    let ordered_cubes = Location::all()
+        .filter_map(|loc| match loc {
+            Location::Corner(major, minor, perp) if major < minor && minor < perp => {
+                Some((major, minor, perp))
+            }
+            _ => None,
+        })
+        .map(|(major, minor, perp)| {
+            let mut faces = [
+                cube.get(Location::Corner(major, minor, perp)),
+                cube.get(Location::Corner(minor, major, perp)),
+                cube.get(Location::Corner(perp, major, minor)),
+            ];
+            faces.sort();
+            (faces[0], faces[1], faces[2])
+        })
+        .map(|cubie| match cubie {
+            (Front, Left, Up) => 0,
+            (Front, Left, Down) => 1,
+            (Front, Right, Up) => 2,
+            (Front, Right, Down) => 3,
+            (Back, Left, Up) => 4,
+            (Back, Left, Down) => 5,
+            (Back, Right, Up) => 6,
+            (Back, Right, Down) => 7,
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ordered_cubes.len(), 8);
+    let bad_cubies_before = ordered_cubes
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(i, cube_id)| {
+            ordered_cubes[0..i]
+                .iter()
+                .filter(|&other_cube| other_cube > cube_id)
+                .count()
+        });
+    bad_cubies_before
+        .enumerate()
+        .fold(0, |v, (i, count)| v + factorial(i + 1) * count) as u16
+}
+
+fn factorial(n: usize) -> usize {
+    match n {
+        0 | 1 => 1,
+        n => n * factorial(n - 1),
+    }
+}
+
+fn edge_orientation(cube: &Cube) -> u16 {
     use Axis::*;
 
     let mut count = 0;
@@ -148,18 +213,34 @@ pub fn edge_orientation(cube: &Cube) -> u16 {
 struct TransitionTable {
     corner_orientation: SingleTable,
     edge_orientation: SingleTable,
+    corner_position: SingleTable,
 }
 
 impl TransitionTable {
     fn init() -> Self {
         let mut table = TransitionTable::default();
-        table.populate();
+
+        table
+            .corner_orientation
+            .populate_with("corner_orientation", corner_orientation);
+        table
+            .edge_orientation
+            .populate_with("edge_orientation", edge_orientation);
+        table
+            .corner_position
+            .populate_with("corner_position", corner_position);
+
         table
     }
+}
 
-    fn populate(&mut self) {
+#[derive(Default)]
+struct SingleTable(HashMap<Move, HashMap<u16, u16>>);
+
+impl SingleTable {
+    fn populate_with(&mut self, name: &str, f: impl Fn(&Cube) -> u16) {
         let start = std::time::Instant::now();
-        log::info!("Populating CoordCube transition table");
+        log::info!("Populating transition table {}", name);
 
         let mut to_expand = VecDeque::new();
         to_expand.push_back(Cube::solved());
@@ -168,32 +249,21 @@ impl TransitionTable {
             for m in Move::all() {
                 let to = from.clone().apply(m);
 
-                let tables: [(_, fn(&Cube) -> u16); 2] = [
-                    (&mut self.corner_orientation, corner_orientation),
-                    (&mut self.edge_orientation, edge_orientation),
-                ];
-
-                let did_update = tables.into_iter().fold(false, |any, (t, f)| {
-                    let did_update = t.insert(f(&from), m, f(&to));
-                    any || did_update
-                });
-
-                if did_update {
+                if self.insert(f(&from), m, f(&to)) {
                     to_expand.push_back(to);
                 }
             }
         }
 
-        log::info!("Finished populating CoordCube transition table, took {:?}", start.elapsed());
+        log::info!(
+            "Finished populating transition table {}, took {:?}",
+            name,
+            start.elapsed()
+        );
     }
-}
 
-#[derive(Default)]
-struct SingleTable(HashMap<Move, HashMap<u16, u16>>);
-
-impl SingleTable {
-    fn get(&self, move_: Move, index: u16) -> u16 {
-        self.0[&move_][&index]
+    fn get(&self, from: u16, move_: Move) -> u16 {
+        self.0[&move_][&from]
     }
 
     fn insert(&mut self, from: u16, move_: Move, to: u16) -> bool {
@@ -265,6 +335,21 @@ mod tests {
             let ccw = cube_with_moves("F' D2 F L D2 L' U L D2 L' F' D2 F U'");
 
             assert_ne!(corner_orientation(&cw), corner_orientation(&ccw));
+        }
+    }
+
+    #[cfg(test)]
+    mod corner_position {
+        use super::*;
+
+        #[test]
+        fn solved_is_zero() {
+            assert_eq!(corner_position(&Cube::solved()), 0);
+        }
+
+        #[test]
+        fn twist_is_non_zero() {
+            assert_ne!(corner_position(&cube_with_moves("F")), 0);
         }
     }
 

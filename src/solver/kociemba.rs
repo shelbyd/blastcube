@@ -38,7 +38,14 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
             },
             post_domino: {
                 let moves = domino_moves().collect::<Vec<_>>();
-                Phase::init(moves, |c| *c == Cube::solved(), vec![])
+                let heuristics: Vec<Box<dyn Heuristic>> = vec![Box::new(HeuristicTable::init(
+                    "corner_position",
+                    |c| c.corner_position(),
+                    &moves,
+                    &challenge.evaluator,
+                    Some(Duration::from_millis(3000)),
+                ))];
+                Phase::init(moves, |c| *c == Cube::solved(), heuristics)
             },
 
             challenge,
