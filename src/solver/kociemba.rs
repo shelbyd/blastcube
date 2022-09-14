@@ -1,4 +1,4 @@
-use crate::cube::coord;
+use crate::cube::coord::CoordCube;
 use crate::prelude::*;
 
 use core::{cmp::Ordering, hash::Hash};
@@ -13,20 +13,22 @@ pub struct Kociemba<E: Evaluator> {
 
 impl<E: Evaluator> Solver<E> for Kociemba<E> {
     fn init(challenge: Challenge<E>) -> Self {
+        CoordCube::init_table();
+
         Kociemba {
             to_domino: {
                 let moves = Move::all().collect::<Vec<_>>();
                 let heuristics: Vec<Box<dyn Heuristic>> = vec![
                     Box::new(HeuristicTable::init(
                         "corner_orientation",
-                        coord::corner_orientation,
+                        |c| c.corner_orientation(),
                         &moves,
                         &challenge.evaluator,
                         None,
                     )),
                     Box::new(HeuristicTable::init(
                         "edge_orientation",
-                        coord::edge_orientation,
+                        |c| c.edge_orientation(),
                         &moves,
                         &challenge.evaluator,
                         None,
@@ -69,7 +71,7 @@ impl<E: Evaluator> Solver<E> for Kociemba<E> {
 
 impl<E: Evaluator> Kociemba<E> {
     fn solve_to(&self, cube: &Cube, phase: &Phase, mut prefix: Vec<Move>) -> Vec<Move> {
-        let cube = cube.clone().apply_all(prefix.clone());
+        let cube = CoordCube::from(cube.clone().apply_all(prefix.clone()));
 
         let mut best_time = self.challenge.evaluator.eval(&prefix);
         loop {
@@ -86,16 +88,17 @@ impl<E: Evaluator> Kociemba<E> {
     fn find_solution(
         &self,
         max_time: Duration,
-        cube: &Cube,
+        cube: &CoordCube,
         move_stack: &mut Vec<Move>,
         phase: &Phase,
     ) -> Search {
-        let this_time = self.challenge.evaluator.eval(move_stack) + phase.min_time(cube);
+        let min_time = phase.min_time(cube);
+        let this_time = self.challenge.evaluator.eval(move_stack) + min_time;
         if this_time > max_time {
             return Search::NotFound(this_time);
         }
 
-        if phase.is_finished(cube) {
+        if min_time == Duration::default() && phase.is_finished(&cube.raw) {
             return Search::Found(move_stack.clone());
         }
 
@@ -188,7 +191,7 @@ impl Phase {
         }
     }
 
-    fn min_time(&self, cube: &Cube) -> Duration {
+    fn min_time(&self, cube: &CoordCube) -> Duration {
         self.heuristics
             .iter()
             .map(|h| h.min_time(cube))
@@ -202,22 +205,24 @@ impl Phase {
 }
 
 trait Heuristic: Sync + Send {
-    fn min_time(&self, cube: &Cube) -> Duration;
+    fn min_time(&self, cube: &CoordCube) -> Duration;
 }
 
-struct HeuristicTable<T: Eq + Hash> {
-    #[allow(dead_code)]
+struct HeuristicTable<T: Eq + Hash, F> {
     name: String,
     exhaustive: bool,
 
     map: HashMap<T, Duration>,
-    simplifier: fn(&Cube) -> T,
+    simplifier: F,
 }
 
-impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
+impl<T: Eq + Hash + core::fmt::Debug, F> HeuristicTable<T, F>
+where
+    F: Fn(&CoordCube) -> T,
+{
     fn init(
         name: &str,
-        simplifier: fn(&Cube) -> T,
+        simplifier: F,
         allowed_moves: &[Move],
         evaluator: &impl Evaluator,
         max_setup: Option<Duration>,
@@ -272,7 +277,7 @@ impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
             return false;
         }
 
-        let value = (self.simplifier)(&Cube::solved().apply_all(move_stack.clone()));
+        let value = self.simplify_depr(&Cube::solved().apply_all(move_stack.clone()));
         let time = evaluator.min_time(&inv);
 
         let already = self.map.get(&value);
@@ -300,24 +305,33 @@ impl<T: Eq + Hash + core::fmt::Debug> HeuristicTable<T> {
 
     #[cfg(test)]
     fn has(&self, cube: &Cube) -> bool {
-        let simplified = (self.simplifier)(cube);
+        let simplified = self.simplify_depr(cube);
         self.map.contains_key(&simplified)
+    }
+
+    fn simplify(&self, cube: &CoordCube) -> T {
+        (self.simplifier)(cube)
+    }
+
+    fn simplify_depr(&self, cube: &Cube) -> T {
+        (self.simplifier)(&CoordCube::from(cube.clone()))
     }
 }
 
-impl<T> Heuristic for HeuristicTable<T>
+impl<T, F> Heuristic for HeuristicTable<T, F>
 where
     T: Eq + Hash + Sync + Send + core::fmt::Debug,
+    F: Fn(&CoordCube) -> T + Sync + Send,
 {
-    fn min_time(&self, cube: &Cube) -> Duration {
-        let value = (self.simplifier)(cube);
+    fn min_time(&self, cube: &CoordCube) -> Duration {
+        let value = self.simplify(cube);
         if let Some(d) = self.map.get(&value) {
             return *d;
         }
 
         if self.exhaustive {
             panic!(
-                "{}: missing value ({:?}) for cube\n{}",
+                "{}: missing value ({:?}) for cube\n{:?}",
                 self.name, value, cube
             );
         }
@@ -338,9 +352,11 @@ mod tests {
         }
 
         lazy_static::lazy_static! {
-            static ref CORNER_ORIENTATION: HeuristicTable<u32> = HeuristicTable::init(
+            static ref CORNER_ORIENTATION:
+                    HeuristicTable<u16, Box<dyn Fn(&CoordCube) -> u16 + Sync + Send>>
+            = HeuristicTable::init(
                 "corner_orientation",
-                coord::corner_orientation,
+                Box::new(|c| c.corner_orientation()),
                 &Move::all().collect::<Vec<_>>(),
                 &simple_evaluator,
                 None,

@@ -1,8 +1,59 @@
 use crate::prelude::*;
 
+use std::collections::{
+    hash_map::{Entry, HashMap},
+    VecDeque,
+};
+
 /// Kociemba-style coordinate cubes.
 
-pub struct CoordCube {}
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CoordCube {
+    pub raw: Cube,
+    corner_orientation: u16,
+    edge_orientation: u16,
+}
+
+impl From<Cube> for CoordCube {
+    fn from(raw: Cube) -> Self {
+        CoordCube {
+            corner_orientation: corner_orientation(&raw),
+            edge_orientation: edge_orientation(&raw),
+            raw,
+        }
+    }
+}
+
+impl CoordCube {
+    pub fn init_table() {
+        lazy_static::initialize(&TRANSITION_TABLE);
+    }
+
+    pub fn apply(mut self, move_: Move) -> Self {
+        self.raw = self.raw.apply(move_);
+
+        self.corner_orientation = TRANSITION_TABLE
+            .corner_orientation
+            .get(move_, self.corner_orientation);
+        self.edge_orientation = TRANSITION_TABLE
+            .edge_orientation
+            .get(move_, self.edge_orientation);
+
+        self
+    }
+
+    pub fn corner_orientation(&self) -> u16 {
+        self.corner_orientation
+    }
+
+    pub fn edge_orientation(&self) -> u16 {
+        self.edge_orientation
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref TRANSITION_TABLE: TransitionTable = TransitionTable::init();
+}
 
 enum Axis {
     FB,
@@ -20,7 +71,7 @@ impl From<Face> for Axis {
     }
 }
 
-pub fn corner_orientation(cube: &Cube) -> u32 {
+pub fn corner_orientation(cube: &Cube) -> u16 {
     let mut count = 0;
     let value = Location::all().fold(0, |v, loc| {
         let value = match loc {
@@ -48,7 +99,7 @@ pub fn corner_orientation(cube: &Cube) -> u32 {
     value
 }
 
-pub fn edge_orientation(cube: &Cube) -> u32 {
+pub fn edge_orientation(cube: &Cube) -> u16 {
     use Axis::*;
 
     let mut count = 0;
@@ -91,6 +142,72 @@ pub fn edge_orientation(cube: &Cube) -> u32 {
     assert_eq!(count, 11);
 
     value
+}
+
+#[derive(Default)]
+struct TransitionTable {
+    corner_orientation: SingleTable,
+    edge_orientation: SingleTable,
+}
+
+impl TransitionTable {
+    fn init() -> Self {
+        let mut table = TransitionTable::default();
+        table.populate();
+        table
+    }
+
+    fn populate(&mut self) {
+        let start = std::time::Instant::now();
+        log::info!("Populating CoordCube transition table");
+
+        let mut to_expand = VecDeque::new();
+        to_expand.push_back(Cube::solved());
+
+        while let Some(from) = to_expand.pop_front() {
+            for m in Move::all() {
+                let to = from.clone().apply(m);
+
+                let tables: [(_, fn(&Cube) -> u16); 2] = [
+                    (&mut self.corner_orientation, corner_orientation),
+                    (&mut self.edge_orientation, edge_orientation),
+                ];
+
+                let did_update = tables.into_iter().fold(false, |any, (t, f)| {
+                    let did_update = t.insert(f(&from), m, f(&to));
+                    any || did_update
+                });
+
+                if did_update {
+                    to_expand.push_back(to);
+                }
+            }
+        }
+
+        log::info!("Finished populating CoordCube transition table, took {:?}", start.elapsed());
+    }
+}
+
+#[derive(Default)]
+struct SingleTable(HashMap<Move, HashMap<u16, u16>>);
+
+impl SingleTable {
+    fn get(&self, move_: Move, index: u16) -> u16 {
+        self.0[&move_][&index]
+    }
+
+    fn insert(&mut self, from: u16, move_: Move, to: u16) -> bool {
+        match self.0.entry(move_).or_default().entry(from) {
+            Entry::Vacant(v) => {
+                v.insert(to);
+                true
+            }
+            Entry::Occupied(o) => {
+                assert_eq!(*o.get(), to);
+                false
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -187,7 +304,7 @@ mod tests {
 
         #[quickcheck]
         fn always_less_than_2_pow_11(moves: Vec<Move>) -> bool {
-            edge_orientation(&Cube::solved().apply_all(moves)) < 2u32.pow(11)
+            edge_orientation(&Cube::solved().apply_all(moves)) < 2_u16.pow(11)
         }
     }
 }

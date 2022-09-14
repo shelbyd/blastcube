@@ -1,6 +1,6 @@
 use crate::cube::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Move {
     pub face: Face,
@@ -13,7 +13,7 @@ impl core::fmt::Debug for Move {
     }
 }
 
-#[derive(Clone, Copy, Debug, enum_iterator::Sequence, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, enum_iterator::Sequence, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub enum Direction {
     Single,
