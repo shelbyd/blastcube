@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 /// Kociemba-style coordinate cubes.
 
@@ -12,6 +12,7 @@ pub struct CoordCube {
     edge_orientation: u16,
 
     corner_position: u16,
+    edge_position: u32,
 }
 
 impl From<Cube> for CoordCube {
@@ -20,6 +21,7 @@ impl From<Cube> for CoordCube {
             corner_orientation: corner_orientation(&raw),
             edge_orientation: edge_orientation(&raw),
             corner_position: corner_position(&raw),
+            edge_position: edge_position(&raw),
 
             raw,
         }
@@ -43,6 +45,9 @@ impl CoordCube {
         self.corner_position = TRANSITION_TABLE
             .corner_position
             .get(self.corner_position, move_);
+        self.edge_position = TRANSITION_TABLE
+            .edge_position
+            .get(self.edge_position, move_);
 
         self
     }
@@ -206,11 +211,61 @@ fn edge_orientation(cube: &Cube) -> u16 {
     value
 }
 
+fn edge_position(cube: &Cube) -> u32 {
+    use Face::*;
+    let ordered_cubes = Location::all()
+        .filter_map(|loc| match loc {
+            Location::Edge(major, minor) if major < minor => Some((major, minor)),
+            _ => None,
+        })
+        .map(|(major, minor)| {
+            let mut faces = [
+                cube.get(Location::Edge(major, minor)),
+                cube.get(Location::Edge(minor, major)),
+            ];
+            faces.sort();
+            (faces[0], faces[1])
+        })
+        .map(|cubie| match cubie {
+            (Front, Left) => 0,
+            (Front, Right) => 1,
+            (Front, Up) => 2,
+            (Front, Down) => 3,
+            (Back, Left) => 4,
+            (Back, Right) => 5,
+            (Back, Up) => 6,
+            (Back, Down) => 7,
+            (Left, Up) => 8,
+            (Left, Down) => 9,
+            (Right, Up) => 10,
+            (Right, Down) => 11,
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(ordered_cubes.len(), 12);
+    let bad_cubies_before = ordered_cubes
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(i, cube_id)| {
+            ordered_cubes[0..i]
+                .iter()
+                .filter(|&other_cube| other_cube > cube_id)
+                .count()
+        });
+
+    bad_cubies_before
+        .enumerate()
+        .fold(0, |v, (i, count)| v + factorial(i + 1) * count) as u32
+}
+
 #[derive(Default)]
 struct TransitionTable {
-    corner_orientation: SingleTable,
-    edge_orientation: SingleTable,
-    corner_position: SingleTable,
+    corner_orientation: SingleTable<u16>,
+    edge_orientation: SingleTable<u16>,
+    corner_position: SingleTable<u16>,
+    edge_position: SingleTable<u32>,
 }
 
 impl TransitionTable {
@@ -226,36 +281,53 @@ impl TransitionTable {
         table
             .corner_position
             .populate_with("corner_position", corner_position);
+        table
+            .edge_position
+            .populate_with("edge_position", edge_position);
 
         table
     }
 }
 
-#[derive(Default)]
-struct SingleTable(HashMap<Move, HashMap<u16, u16>>);
+#[derive(Default, Debug)]
+struct SingleTable<T>(HashMap<Move, BTreeMap<T, T>>);
 
-impl SingleTable {
-    fn populate_with(&mut self, name: &str, f: impl Fn(&Cube) -> u16) {
+impl<T> SingleTable<T>
+where
+    T: core::hash::Hash + Eq + core::fmt::Debug + Copy + Ord,
+{
+    fn populate_with(&mut self, name: &str, f: impl Fn(&Cube) -> T) {
         use std::time::Instant;
 
         let start = std::time::Instant::now();
         log::info!("Populating transition table {}", name);
 
-        let mut to_expand = Vec::from([Cube::solved()]);
+        let mut to_expand = BTreeMap::new();
+
+        let solved = Cube::solved();
+        to_expand.insert(f(&solved), solved);
 
         let log_every = Duration::from_millis(100);
         let mut last_log = Instant::now();
-        while let Some(from) = to_expand.pop() {
+        while let Some((from_v, from)) = pop_front(&mut to_expand) {
+            assert!(!self.has_outgoing(&from_v));
+
             if last_log.elapsed() >= log_every {
                 last_log += log_every;
                 log::info!("to_expand.len(): {}", to_expand.len());
+                log::info!("     self.len(): {}", self.len());
             }
 
             for m in Move::all() {
                 let to = from.clone().apply(m);
+                let to_v = f(&to);
 
-                if self.insert(f(&from), m, f(&to)) {
-                    to_expand.push(to);
+                self.insert(from_v, m, to_v);
+                let should_expand =
+                    !to_expand.contains_key(&to_v) && !self.has_outgoing(&to_v) && to_v != from_v;
+                if should_expand {
+                    let already = to_expand.insert(to_v, to);
+                    assert_eq!(already, None);
                 }
             }
         }
@@ -268,26 +340,35 @@ impl SingleTable {
         );
     }
 
-    fn get(&self, from: u16, move_: Move) -> u16 {
+    fn get(&self, from: T, move_: Move) -> T {
         self.0[&move_][&from]
     }
 
-    fn insert(&mut self, from: u16, move_: Move, to: u16) -> bool {
-        match self.0.entry(move_).or_default().entry(from) {
-            Entry::Vacant(v) => {
-                v.insert(to);
-                true
-            }
-            Entry::Occupied(o) => {
-                assert_eq!(*o.get(), to);
-                false
-            }
+    fn insert(&mut self, from: T, move_: Move, to: T) {
+        if from == to {
+            return;
         }
+
+        let already = self.0.entry(move_).or_default().insert(from, to);
+        assert_eq!(
+            already, None,
+            "Reinserted {:?} -> {:?} -> {:?}",
+            from, move_, to
+        );
     }
 
     fn len(&self) -> usize {
         self.0.values().map(|v| v.len()).sum()
     }
+
+    fn has_outgoing(&self, t: &T) -> bool {
+        self.0.values().any(|map| map.contains_key(t))
+    }
+}
+
+fn pop_front<K: Ord + Clone, V>(map: &mut BTreeMap<K, V>) -> Option<(K, V)> {
+    let key = map.keys().next()?.clone();
+    map.remove_entry(&key)
 }
 
 #[cfg(test)]
@@ -400,6 +481,21 @@ mod tests {
         #[quickcheck]
         fn always_less_than_2_pow_11(moves: Vec<Move>) -> bool {
             edge_orientation(&Cube::solved().apply_all(moves)) < 2_u16.pow(11)
+        }
+    }
+
+    #[cfg(test)]
+    mod edge_position {
+        use super::*;
+
+        #[test]
+        fn solved_is_zero() {
+            assert_eq!(edge_position(&Cube::solved()), 0);
+        }
+
+        #[test]
+        fn twist_is_non_zero() {
+            assert_ne!(edge_position(&cube_with_moves("F")), 0);
         }
     }
 }
